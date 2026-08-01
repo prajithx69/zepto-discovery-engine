@@ -36,6 +36,22 @@ RULES:
 OUTPUT: strict JSON array, no prose, no markdown fences:
 [{"id": "...", "primary_tag": "...", "categories_mentioned": [...], "sentiment": "positive|negative|mixed"}]"""
 
+ALIASES = {
+    "icecream": "ice cream",
+    "ice-cream": "ice cream",
+    "veggies": "vegetables",
+    "veg": "vegetables",
+    "vegetable": "vegetables",
+    "fruit": "fruits",
+    "curd": "dairy",
+    "paneer": "dairy",
+}
+
+PERISHABLE = {
+    "vegetables", "fruits", "milk", "ice cream", "dairy",
+    "chicken", "eggs", "meat", "curd", "bread",
+}
+
 
 @st.cache_data
 def load_tagged():
@@ -57,19 +73,23 @@ def tag_batch(batch_df):
     return json.loads(text)
 
 
-def cats_for(df, tag, perishable_only=False):
+def cats_for(df, tag, mode=None):
+    """mode: 'perishable' keeps only perishables, 'nonperishable' drops them."""
     sub = df[df.primary_tag == tag]
     counts = {}
     for c in sub.categories_mentioned.dropna():
         try:
             for item in ast.literal_eval(c):
-                counts[item] = counts.get(item, 0) + 1
+                key = str(item).strip().lower()
+                key = ALIASES.get(key, key)
+                counts[key] = counts.get(key, 0) + 1
         except Exception:
             continue
-    s = pd.Series(counts)
-    if perishable_only:
-        drop = {"electronics", "skincare", "beauty", "household", "toys", "batteries"}
-        s = s[~s.index.isin(drop)]
+    s = pd.Series(counts, dtype="int64")
+    if mode == "perishable":
+        s = s[s.index.isin(PERISHABLE)]
+    elif mode == "nonperishable":
+        s = s[~s.index.isin(PERISHABLE)]
     return s.sort_values(ascending=True).tail(8)
 
 
@@ -141,24 +161,35 @@ with tab1:
                  horizontal=True, height=260)
     st.caption(
         f"{len(df) - len(signal)} of {len(df)} reviews are service complaints carrying no "
-        f"category signal. Quality and trust dominate what remains."
+        f"category signal. Quality and trust dominate what remains. "
+        f"Bars show number of reviews per theme."
     )
 
     st.divider()
 
     st.subheader("Two different fears, in two different sets of categories")
+
+    fresh_data = cats_for(df, "TRUST_QUALITY", mode="perishable")
+    auth_data = cats_for(df, "TRUST_AUTHENTICITY", mode="nonperishable")
+
     fresh, auth = st.columns(2, gap="large")
 
     with fresh:
         st.caption("**Freshness risk** — users fear the product will arrive bad")
-        st.bar_chart(cats_for(df, "TRUST_QUALITY", perishable_only=True),
-                     horizontal=True, height=280)
-        st.caption("Concentrated in perishables and cold-chain items.")
+        st.bar_chart(fresh_data, horizontal=True, height=280)
+        st.caption(
+            f"Reviews mentioning each category. {int(fresh_data.sum())} mentions across "
+            f"perishable and cold-chain items."
+        )
 
     with auth:
         st.caption("**Authenticity risk** — users fear the product will be fake")
-        st.bar_chart(cats_for(df, "TRUST_AUTHENTICITY"), horizontal=True, height=280)
-        st.caption("Concentrated in considered, higher-value goods.")
+        st.bar_chart(auth_data, horizontal=True, height=280)
+        st.caption(
+            f"Reviews mentioning each category. Only {int(auth_data.sum())} mentions total, "
+            f"so this is directional rather than statistically robust. Note the axis scale "
+            f"differs from the chart on the left."
+        )
 
     st.divider()
 
@@ -211,16 +242,16 @@ with tab2:
 
     st.markdown("**1. Most review noise hides a narrow band of real signal**")
     st.write(
-        "1,405 of 1,940 reviews (72%) are service complaints with no category signal. "
-        "The remaining 535 carry the behavioural evidence, and TRUST_QUALITY alone accounts "
+        "1,405 of 1,944 reviews are service complaints with no category signal. "
+        "The remaining 539 carry the behavioural evidence, and TRUST_QUALITY alone accounts "
         "for 341 of them, roughly 65% of all non-noise signal."
     )
 
     st.markdown("**2. Distrust is category-specific, and comes in two distinct flavours**")
     st.write(
-        "Freshness risk clusters in perishables: vegetables (56), milk (41), fruits (28), "
-        "ice cream (25), dairy (10). Authenticity risk clusters elsewhere: electronics (5), "
-        "skincare (3), beauty (3). Different categories, different fears, different fixes."
+        "Freshness risk clusters in perishables: vegetables, milk, fruits, ice cream, dairy. "
+        "Authenticity risk clusters elsewhere: electronics, skincare, beauty. "
+        "Different categories, different fears, different fixes."
     )
 
     st.markdown("**3. Different sources reveal different truths**")
@@ -260,9 +291,11 @@ with tab3:
         "plus 300 Reddit posts and comments from 8 category-relevant threads.\n\n"
         "2. **Classify** — each item tagged by Claude Haiku against a fixed 8-theme schema "
         "at temperature 0, in batches of 15, returning structured JSON.\n\n"
-        "3. **Aggregate** — findings are computed from tag counts, not from re-reading the "
+        "3. **Normalise** — category strings are lowercased and mapped through an alias table "
+        "so variants such as \"icecream\" and \"ice cream\" are not counted separately.\n\n"
+        "4. **Aggregate** — findings are computed from tag counts, not from re-reading the "
         "corpus, so the same input produces the same output.\n\n"
-        "4. **Validate** — a blind 50-review sample hand-coded against the same schema, "
+        "5. **Validate** — a blind 50-review sample hand-coded against the same schema, "
         "then compared to the model's tags."
     )
 
@@ -295,11 +328,14 @@ with tab3:
         "**Probabilistic output.** Re-running a generative summary produces different results "
         "each time. Mitigated by classifying into a fixed schema at temperature 0 and computing "
         "insights from tag counts, so aggregates are stable and reproducible.\n\n"
-        "**Source bias.** The corpus skews heavily negative (65% one-star), because people "
-        "review when angry or delighted, rarely when satisfied. Review data indicates direction; "
-        "interviews supply confidence in that direction.\n\n"
+        "**Free-text category drift.** The model returns category names as free text, which "
+        "produced near-duplicate labels. Mitigated with an alias table applied before counting, "
+        "and flagged here because the raw output cannot be trusted to be consistent.\n\n"
+        "**Source bias.** The corpus skews heavily negative, because people review when angry "
+        "or delighted, rarely when satisfied. Review data indicates direction; interviews "
+        "supply confidence in that direction.\n\n"
         "**Scope of automation.** In the proposed solution, the model selects the brand bridge, "
         "target category, product and explanation. It is deliberately not given control of "
         "discount depth, because a conversion-optimising system will over-discount to hit its "
-        "target. Pricing stays rule-based."
+        "target. Pricing stays rule-based within per-lever bands enforced in code."
     )
