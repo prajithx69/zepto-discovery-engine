@@ -49,7 +49,7 @@ ALIASES = {
 
 PERISHABLE = {
     "vegetables", "fruits", "milk", "ice cream", "dairy",
-    "chicken", "eggs", "meat", "curd", "bread",
+    "chicken", "eggs", "meat", "bread",
 }
 
 
@@ -118,6 +118,10 @@ def run_tagging(work_df):
         with b:
             st.dataframe(tdf[["primary_tag", "categories_mentioned", "sentiment"]],
                          use_container_width=True, height=280)
+        st.caption(
+            "These results are independent of the frozen corpus above and are not written "
+            "back to it."
+        )
 
 
 df = load_tagged()
@@ -160,9 +164,9 @@ with tab1:
     st.bar_chart(signal["primary_tag"].value_counts().sort_values(),
                  horizontal=True, height=260)
     st.caption(
-        f"{len(df) - len(signal)} of {len(df)} reviews are service complaints carrying no "
-        f"category signal. Quality and trust dominate what remains. "
-        f"Bars show number of reviews per theme."
+        f"Bars show number of reviews per theme. {len(df) - len(signal)} of {len(df)} reviews "
+        f"are service complaints carrying no category signal. Quality and trust dominate "
+        f"what remains."
     )
 
     st.divider()
@@ -186,7 +190,7 @@ with tab1:
         st.caption("**Authenticity risk** — users fear the product will be fake")
         st.bar_chart(auth_data, horizontal=True, height=280)
         st.caption(
-            f"Reviews mentioning each category. Only {int(auth_data.sum())} mentions total, "
+            f"Reviews mentioning each category. Only {int(auth_data.sum())} mentions in total, "
             f"so this is directional rather than statistically robust. Note the axis scale "
             f"differs from the chart on the left."
         )
@@ -195,6 +199,12 @@ with tab1:
 
     st.subheader("Run the pipeline yourself")
     st.write("Three ways to test the workflow: fetch live reviews, upload a CSV, or paste your own text.")
+    st.info(
+        "Live runs are tagged and charted independently below. They do not alter the frozen "
+        "corpus above. The 1,944-review analysis and its 72% validation describe a fixed "
+        "snapshot, so the headline figures stay reproducible and auditable. What a live run "
+        "demonstrates is that the schema generalises to reviews the model has never seen."
+    )
 
     m1, m2, m3 = st.tabs(["Live fetch", "Upload CSV", "Paste text"])
 
@@ -291,12 +301,18 @@ with tab3:
         "plus 300 Reddit posts and comments from 8 category-relevant threads.\n\n"
         "2. **Classify** — each item tagged by Claude Haiku against a fixed 8-theme schema "
         "at temperature 0, in batches of 15, returning structured JSON.\n\n"
-        "3. **Normalise** — category strings are lowercased and mapped through an alias table "
+        "3. **Normalise** — category strings are lowercased and mapped through an alias table, "
         "so variants such as \"icecream\" and \"ice cream\" are not counted separately.\n\n"
         "4. **Aggregate** — findings are computed from tag counts, not from re-reading the "
         "corpus, so the same input produces the same output.\n\n"
         "5. **Validate** — a blind 50-review sample hand-coded against the same schema, "
         "then compared to the model's tags."
+    )
+    st.caption(
+        "Scope note: the analysed corpus is deliberately frozen. Live fetch, CSV upload and "
+        "pasted text run the same classification path on new input and render their own "
+        "results, but never write back to the corpus. This keeps the validation figure "
+        "attached to a specific, re-checkable dataset."
     )
 
     st.divider()
@@ -329,8 +345,9 @@ with tab3:
         "each time. Mitigated by classifying into a fixed schema at temperature 0 and computing "
         "insights from tag counts, so aggregates are stable and reproducible.\n\n"
         "**Free-text category drift.** The model returns category names as free text, which "
-        "produced near-duplicate labels. Mitigated with an alias table applied before counting, "
-        "and flagged here because the raw output cannot be trusted to be consistent.\n\n"
+        "produced near-duplicate labels such as \"icecream\" and \"ice cream\". Mitigated with "
+        "an alias table applied before counting, and flagged here because raw model output "
+        "cannot be assumed consistent.\n\n"
         "**Source bias.** The corpus skews heavily negative, because people review when angry "
         "or delighted, rarely when satisfied. Review data indicates direction; interviews "
         "supply confidence in that direction.\n\n"
